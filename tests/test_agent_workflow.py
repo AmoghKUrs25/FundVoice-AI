@@ -324,3 +324,30 @@ def test_report_generation_blocked_when_verification_failed():
     assert result["human_review_required"] is True
     assert result["next_action"] == "human_review"
 
+
+def test_workflow_returns_structured_valuation_and_evidence():
+    result = fundvoice_graph.invoke(
+        {
+            "portfolio": make_portfolio(),
+            "nav_records": [make_nav()],
+            "errors": [],
+            "audit_events": [],
+        }
+    )
+
+    assert result["human_review_required"] is False
+    assert result["next_action"] == "complete"
+
+    valuation = result["valuation"]
+
+    assert valuation["portfolio_id"] == "portfolio-001"
+    assert valuation["valuation_date"] == date(2026, 10, 20)
+    assert valuation["total_value"] == Decimal("255.00")
+
+    holding = valuation["holdings"][0]
+
+    assert holding["holding_id"] == "holding-001"
+    assert holding["nav"] == Decimal("25.50")
+    assert holding["nav_date"] == date(2026, 10, 20)
+    assert holding["evidence_id"] == "evidence-001"
+    assert holding["source_url"] == "https://example.com/nav"
