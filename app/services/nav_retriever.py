@@ -137,3 +137,43 @@ async def fetch_nav_history(
         )
 
     return response.text
+
+
+def fetch_nav_history_sync(
+    start_date: date,
+    end_date: date,
+) -> str:
+    """Synchronously download NAV history for a date range."""
+
+    if start_date > end_date:
+        raise ValueError(
+            "Start date cannot be later than end date."
+        )
+
+    params = {
+        "frmdt": start_date.strftime("%d-%b-%Y"),
+        "todt": end_date.strftime("%d-%b-%Y"),
+    }
+
+    try:
+        with httpx.Client(
+            timeout=20.0,
+            follow_redirects=True,
+        ) as client:
+            response = client.get(
+                AMFI_NAV_URL,
+                params=params,
+            )
+            response.raise_for_status()
+
+    except httpx.HTTPError as exc:
+        raise NAVRetrievalError(
+            f"Unable to retrieve NAV history: {exc}"
+        ) from exc
+
+    if not response.text.strip():
+        raise NAVRetrievalError(
+            "The NAV source returned an empty response."
+        )
+
+    return response.text
