@@ -1,26 +1,34 @@
 
 from typing import Any, TypedDict
 
+from app.models.nav import NAVRecord
+from app.models.portfolio import PortfolioStatement
+from app.models.verification import VerificationResult
+
+
+class AuditEvent(TypedDict):
+    event: str
+    timestamp: str
+
 
 class FundVoiceState(TypedDict, total=False):
     """
     Shared state passed between FundVoice AI workflow nodes.
 
-    Each node reads the information it needs and returns updates.
-    total=False allows fields to be added as the workflow progresses.
+    Fields are progressively populated as the workflow runs.
     """
 
-    # User's portfolio input
-    portfolio: Any
+    # Input
+    portfolio: PortfolioStatement
 
-    # NAV records retrieved from a data source
-    nav_records: list[Any]
+    # NAV retrieval
+    nav_records: list[NAVRecord]
 
-    # Verification result and calculated portfolio valuation
-    verification: Any
-    valuation: Any
+    # Verification and valuation
+    verification: VerificationResult
+    valuation: dict[str, Any]
 
-    # Human-readable report
+    # Report output
     report: str
 
     # Workflow control
@@ -29,5 +37,5 @@ class FundVoiceState(TypedDict, total=False):
     retry_count: int
     next_action: str
 
-    # Audit trail of workflow decisions
-    audit_events: list[dict[str, Any]]
+    # Audit trail
+    audit_events: list[AuditEvent]
