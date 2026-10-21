@@ -1,11 +1,13 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
+import pytest
+from pydantic import ValidationError
+
 from app.models.nav import NAVEvidence, NAVRecord
 from app.models.portfolio import Holding, PortfolioStatement
 from app.models.verification import VerificationStatus
 from app.verification.engine import verify_portfolio
-
 
 VALUATION_DATE = date(2026, 10, 16)
 
@@ -112,3 +114,37 @@ def test_zero_units_are_not_rejected_as_invalid():
     )
 
     assert result.status == VerificationStatus.VERIFIED
+
+    
+def test_missing_source_url_requires_review():
+    portfolio = create_portfolio()
+    nav_record = create_nav_record()
+    nav_record.evidence.source_url = "   "
+
+    result = verify_portfolio(portfolio, [nav_record])
+
+    assert result.status == VerificationStatus.REVIEW_REQUIRED
+    assert result.issues[0].code == "MISSING_SOURCE_URL"
+
+
+def test_missing_evidence_text_requires_review():
+    portfolio = create_portfolio()
+    nav_record = create_nav_record()
+    nav_record.evidence.evidence_text = "   "
+
+    result = verify_portfolio(portfolio, [nav_record])
+
+    assert result.status == VerificationStatus.REVIEW_REQUIRED
+    assert result.issues[0].code == "MISSING_EVIDENCE_TEXT"
+
+
+
+def test_negative_units_are_rejected_by_holding_model():
+    with pytest.raises(ValidationError):
+        Holding(
+            holding_id="H003",
+            scheme_name="Example Equity Fund",
+            units=Decimal("-1"),
+        )
+
+
