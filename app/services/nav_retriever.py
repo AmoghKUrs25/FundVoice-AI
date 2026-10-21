@@ -20,31 +20,35 @@ def parse_nav_csv(
     requested_scheme_name: str,
     requested_date: date,
 ) -> NAVRecord:
-    """
-    Parse AMFI-style semicolon-separated NAV data.
-
-    Expected record format:
-        Scheme Code;ISIN;ISIN;Scheme Name;NAV;Date
-
-    This function requires an exact scheme-name match
-    and an exact NAV-date match.
-
-    It does not silently substitute a NAV from another date.
-    """
+    """Parse legacy and current AMFI-style NAV history records."""
 
     matches = []
 
     for line in csv_text.splitlines():
         fields = [field.strip() for field in line.split(";")]
 
-        if len(fields) < 6:
+        scheme_name = ""
+        nav_text = ""
+        date_text = ""
+
+        # Current AMFI format: 8 columns
+        # Scheme Code;NAV Name;Plan;Option;ISIN;ISIN;NAV;Date
+        if len(fields) >= 8 and fields[0].isdigit():
+            scheme_name = fields[1]
+            nav_text = fields[6]
+            date_text = fields[7]
+
+        # Legacy/test format: 6 columns
+        # Scheme Code;ISIN;ISIN;Scheme Name;NAV;Date
+        elif len(fields) >= 6 and fields[0].isdigit():
+            scheme_name = fields[3]
+            nav_text = fields[4]
+            date_text = fields[5]
+
+        else:
             continue
 
-        scheme_name = fields[3]
-        nav_text = fields[4]
-        date_text = fields[5]
-
-        if scheme_name.casefold() != requested_scheme_name.casefold():
+        if scheme_name.casefold() != requested_scheme_name.strip().casefold():
             continue
 
         try:
@@ -52,9 +56,7 @@ def parse_nav_csv(
                 date_text,
                 "%d-%b-%Y",
             ).date()
-
             nav = Decimal(nav_text)
-
         except (ValueError, ArithmeticError):
             continue
 

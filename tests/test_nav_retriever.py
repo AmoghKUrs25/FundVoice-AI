@@ -1,4 +1,4 @@
-
+from decimal import Decimal
 from datetime import date
 
 import pytest
@@ -83,4 +83,58 @@ def test_invalid_nav_is_rejected():
             invalid_data,
             "Example Equity Fund",
             date(2026, 10, 16),
+        )
+
+
+
+def test_current_eight_column_amfi_format():
+    live_format_data = (
+        "145488;Example Overnight Fund - Direct - Monthly Payout;"
+        "Direct Plan;Monthly IDCW;INF209KB1ZL4;;"
+        "1003.6262;20-Oct-2026\n"
+    )
+
+    result = parse_nav_csv(
+        live_format_data,
+        "Example Overnight Fund - Direct - Monthly Payout",
+        date(2026, 10, 20),
+    )
+
+    assert result.scheme_name == (
+        "Example Overnight Fund - Direct - Monthly Payout"
+    )
+    assert result.nav_date == date(2026, 10, 20)
+    assert result.nav == Decimal("1003.6262")
+    assert result.evidence.evidence_text == live_format_data.strip()
+
+def test_invalid_nav_in_current_eight_column_format():
+    invalid_data = (
+        "145488;Example Overnight Fund - Direct;"
+        "Direct Plan;Monthly IDCW;INF209KB1ZL4;;"
+        "0;20-Oct-2026\n"
+    )
+
+    with pytest.raises(NAVRetrievalError):
+        parse_nav_csv(
+            invalid_data,
+            "Example Overnight Fund - Direct",
+            date(2026, 10, 20),
+        )
+
+
+def test_duplicate_current_format_records_are_rejected():
+    duplicate_data = (
+        "145488;Example Overnight Fund - Direct;"
+        "Direct Plan;Monthly IDCW;INF209KB1ZL4;;"
+        "1003.6262;20-Oct-2026\n"
+        "145489;Example Overnight Fund - Direct;"
+        "Direct Plan;Monthly IDCW;INF209KB1ZL5;;"
+        "1004.0000;20-Oct-2026\n"
+    )
+
+    with pytest.raises(NAVRetrievalError):
+        parse_nav_csv(
+            duplicate_data,
+            "Example Overnight Fund - Direct",
+            date(2026, 10, 20),
         )
