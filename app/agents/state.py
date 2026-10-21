@@ -13,29 +13,29 @@ class AuditEvent(TypedDict):
 
 class FundVoiceState(TypedDict, total=False):
     """
-    Shared state passed between FundVoice AI workflow nodes.
+    Shared state and output contract for the FundVoice AI workflow.
 
-    Fields are progressively populated as the workflow runs.
+    Successful workflow:
+        report: generated portfolio report
+        human_review_required: False
+        next_action: "complete"
+
+    Human-review workflow:
+        human_review_required: True
+        next_action: "human_review"
+
+    Callers should handle fields that may be absent.
     """
 
-    # Input
     portfolio: PortfolioStatement
-
-    # NAV retrieval
     nav_records: list[NAVRecord]
-
-    # Verification and valuation
     verification: VerificationResult
     valuation: dict[str, Any]
-
-    # Report output
     report: str
 
-    # Workflow control
     errors: list[str]
     human_review_required: bool
     retry_count: int
     next_action: str
 
-    # Audit trail
     audit_events: list[AuditEvent]
