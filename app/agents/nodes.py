@@ -9,10 +9,12 @@ from app.agents.state import FundVoiceState
 def add_audit_event(state: FundVoiceState, message: str) -> list[dict[str, Any]]:
     """Return a new audit trail containing this workflow event."""
     events = list(state.get("audit_events", []))
-    events.append({
-        "event": message,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
+    events.append(
+        {
+            "event": message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    )
     return events
 
 
@@ -55,7 +57,6 @@ def validate_portfolio_node(state: FundVoiceState) -> dict:
             state, "Portfolio input accepted for NAV retrieval"
         ),
     }
-
 
 
 def retrieve_nav_node(state: FundVoiceState) -> dict:
@@ -129,7 +130,6 @@ def retrieve_nav_node(state: FundVoiceState) -> dict:
     }
 
 
-
 def verify_nav_node(state: FundVoiceState) -> dict:
     """Run the project's existing verification engine."""
     from app.verification.engine import verify_portfolio
@@ -196,7 +196,8 @@ def calculate_valuation_node(state: FundVoiceState) -> dict:
 
     try:
         valuation = value_portfolio(
-            state["portfolio"], state.get("nav_records", [])
+            state["portfolio"],
+            state.get("nav_records", []),
         )
     except Exception as exc:
         return {
@@ -219,11 +220,8 @@ def calculate_valuation_node(state: FundVoiceState) -> dict:
     }
 
 
-
 def generate_report_node(state: FundVoiceState) -> dict:
     """Generate a portfolio report from verified valuation results."""
-
-    valuation = state.get("valuation")
 
     verification = state.get("verification")
     status = getattr(verification, "status", None)
@@ -245,8 +243,10 @@ def generate_report_node(state: FundVoiceState) -> dict:
         return human_review_node({**state, "errors": errors})
 
     holdings = valuation.get("holdings", [])
+
     report_lines = [
-        "FundVoice AI \u2014 Mutual Fund Portfolio Report"        f"Portfolio ID: {valuation['portfolio_id']}",
+        "FundVoice AI — Mutual Fund Portfolio Report",
+        f"Portfolio ID: {valuation['portfolio_id']}",
         f"Valuation date: {valuation['valuation_date']}",
         "",
         "Holdings:",
@@ -257,8 +257,8 @@ def generate_report_node(state: FundVoiceState) -> dict:
             [
                 f"Fund: {holding['scheme_name']}",
                 f"Units: {holding['units']}",
-                f"NAV: \u20b9{holding['nav']}",
-                f"Holding value: \u20b9{holding['value']}",
+                f"NAV: ₹{holding['nav']}",
+                f"Holding value: ₹{holding['value']}",
                 f"NAV date: {holding['nav_date']}",
                 f"Evidence ID: {holding['evidence_id']}",
                 f"Source: {holding['source_url']}",
@@ -268,17 +268,17 @@ def generate_report_node(state: FundVoiceState) -> dict:
 
     report_lines.extend(
         [
-            f"Total portfolio value: \u20b9{valuation['total_value']}",            "",
+            f"Total portfolio value: ₹{valuation['total_value']}",
+            "",
             "Verification: Passed by the configured verification checks.",
-            "Note: NAV evidence presence was checked; independent source "
-            "authentication is not implied.",
+            (
+                "Note: NAV evidence presence was checked; "
+                "independent source authentication is not implied."
+            ),
         ]
     )
 
-    audit_events = add_audit_event(
-    state,
-    "Report generated",
-)
+    audit_events = add_audit_event(state, "Report generated")
 
     return {
         "report": "\n".join(report_lines),
@@ -289,9 +289,8 @@ def generate_report_node(state: FundVoiceState) -> dict:
     }
 
 
-
-
 def human_review_node(state: FundVoiceState) -> dict:
+    """Pause the workflow and flag it for human review."""
     return {
         "human_review_required": True,
         "next_action": "human_review",
@@ -300,4 +299,3 @@ def human_review_node(state: FundVoiceState) -> dict:
             state, "Workflow paused for human review"
         ),
     }
-
