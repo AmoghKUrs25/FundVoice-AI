@@ -4,7 +4,7 @@ FundVoiceAI is a Python-based project designed to help investors understand thei
 
 The project combines portfolio calculations, NAV data retrieval, verification safeguards, and a Streamlit dashboard to make mutual fund portfolio information easier to understand.
 
-> **Development status:** Active development. The automated test suite currently passes 94 tests. Full end-to-end validation with real portfolio data and voice playback.
+> **Development status:** Active development. The automated test suite currently passes 100 tests. Full end-to-end validation with real portfolio data and voice playback.
 
 ## Key Features
 
@@ -21,14 +21,65 @@ The project combines portfolio calculations, NAV data retrieval, verification sa
 
 Feature availability and completeness may vary as development continues.
 
+
 ## Technology Stack
 
-- Python
-- Streamlit
-- pytest
-- Git and GitHub
+Technology stack
+1. Python — Core programming language
+
+Implements portfolio processing, NAV parsing, verification, valuation, report generation, and application logic.
+
+
+2. LangGraph — Agent workflow orchestration
+
+Coordinates the workflow nodes for portfolio validation, NAV retrieval, verification, valuation, report generation, and human-review routing.
+
+
+3. Streamlit — Frontend and dashboard
+
+Provides the user interface for running portfolio analysis, viewing verification and valuation results, and accessing voice controls.
+
+
+4. SQLite — Audit database
+
+Stores workflow audit events, timestamps, run IDs, and event details for traceability.
+
+
+5. Pydantic — Data validation and models
+
+Structures and validates portfolio holdings, NAV records, evidence, and verification results.
+
+
+
+6. pytest — Automated testing
+
+Tests NAV parsing, valuation calculations, verification rules, audit persistence, voice-report preparation, and workflow execution.
+
+
+
+7. JavaScript Web Speech API — Voice playback
+
+Uses the browser's built-in speechSynthesis and SpeechSynthesisUtterance APIs to read reports aloud, with Play, Pause/Resume, and Stop controls.
+
+
+8. Git and GitHub — Version control
+
+Track source-code changes, manage commits, and host the project repository.
+
+
+
+Supporting technologies
+Technology	Purpose
+Decimal	Precise financial arithmetic
+datetime	Valuation dates, timestamps, and audit records
+HTTPX	HTTP requests, if used by the NAV retrieval implementation
+AMFI NAV data source	Mutual fund NAV data retrieval
+HTML and CSS	Dashboard component markup and styling
 
 Additional dependencies are defined by the project's dependency files, where available.
+
+
+
 
 ## Project Structure
 
@@ -67,6 +118,8 @@ FundVoiceAI/
 ```
 
 *This is a representative overview. The exact files and folders depend on the current checkout.*
+
+
 
 ## Prerequisites
 
@@ -146,7 +199,7 @@ python -m pytest -q
 ### Latest verified result
 
 ```text
-94 passed in 1.46s
+100 passed in 1.46s
 ```
 
 This result was observed in the current development environment. Test results can differ after dependency changes or when running in another environment.
