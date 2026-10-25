@@ -30,3 +30,9 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
+# Temporary development backups
+*.pre-*.py
+*.py.pre-*
+*.backup
+*_backup.py
+*_before_redesign.py
