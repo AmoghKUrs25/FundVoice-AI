@@ -454,15 +454,34 @@ def generate_report_node(
     total_value = valuation["total_value"]
     valuation_date = valuation["valuation_date"]
 
+    holdings = state.get("portfolio").holdings
+    scheme_names = ", ".join(
+        holding.scheme_name for holding in holdings
+    )
+
+    nav_records = state.get("nav_records", [])
+    evidence_ids = ", ".join(
+        record.evidence.evidence_id
+        for record in nav_records
+        if record.evidence is not None
+    )
+    evidence_urls = ", ".join(
+        record.evidence.source_url
+        for record in nav_records
+        if record.evidence is not None
+    )
+
     report = (
-        f"Portfolio valuation for {valuation_date}. "
+        f"FundVoice AI Portfolio valuation for {valuation_date}. "
+        f"Funds included: {scheme_names}. "
+        f"Supporting evidence IDs: {evidence_ids}. "
+        f"Evidence sources: {evidence_urls}. "
         f"The calculated portfolio value is ₹{total_value:,.2f}. "
         "This report presents a valuation, not investment advice."
     )
-
     return {
         "report": report,
-        "next_action": "completed",
+        "next_action": "complete",
         "human_review_required": False,
         "audit_events": add_audit_event(
             state,

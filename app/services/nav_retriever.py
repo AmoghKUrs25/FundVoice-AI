@@ -67,8 +67,19 @@ def _normalize_scheme_name(value: str) -> str:
     return SCHEME_NAME_ALIASES.get(normalized, normalized)
 
 
+def _normalize_plan(value: str) -> str:
+    """Treat 'Direct' and 'Direct Plan' as equivalent plan labels."""
+
+    normalized = " ".join(value.strip().casefold().split())
+
+    if normalized.endswith(" plan"):
+        normalized = normalized[:-len(" plan")].strip()
+
+    return normalized
+
+
 def _normalize_option(value: str) -> str:
-    """Treat 'Growth' and 'Growth Option' as equivalent."""
+    """Normalize option spacing and the optional 'Option' suffix."""
 
     normalized = " ".join(value.strip().casefold().split())
 
@@ -96,14 +107,7 @@ def _parse_date(value: str) -> date | None:
 
 
 def _detect_csv_layout(csv_text: str) -> tuple[str, list[str]]:
-    """
-    Identify the AMFI CSV layout from its header.
-
-    Supported layouts:
-    - historical: NAV Name, Plan, Option, NAV, Date
-    - export: Scheme Name, Plan, Option, Net Asset Value, Date
-    - legacy: six-column fixtures with Scheme Name, NAV, Date
-    """
+    """Identify the AMFI CSV layout from its header or data rows."""
 
     header = next(
         (
@@ -114,22 +118,24 @@ def _detect_csv_layout(csv_text: str) -> tuple[str, list[str]]:
         [],
     )
 
-    if not header:
-        return "legacy", []
+    if header:
+        if "nav name" in header:
+            return "historical", header
 
-    if "nav name" in header:
-        return "historical", header
+        if "scheme name" in header and "net asset value" in header:
+            return "export", header
 
-    # IMPORTANT:
-    # Do not classify a six-column fixture as the eight-column export.
-    # The official export has the specific "Net Asset Value" header.
-    if (
-        "scheme name" in header
-        and "net asset value" in header
-    ):
-        return "export", header
+        return "legacy", header
 
-    return "legacy", header
+    # Headerless fixtures and data: identify the eight-column layout
+    # by its column count. Legacy six-column rows remain supported.
+    for line in csv_text.splitlines():
+        fields = [field.strip() for field in line.split(";")]
+
+        if fields and fields[0].isdigit() and len(fields) >= 8:
+            return "historical", []
+
+    return "legacy", []
 
 
 def parse_nav_csv(
@@ -206,9 +212,10 @@ def parse_nav_csv(
                 ):
                     continue
 
-                if plan.casefold() != requested_plan.casefold():
+                if _normalize_plan(plan) != _normalize_plan(requested_plan):
                     continue
 
+                # Do not treat distinct payout labels as interchangeable.
                 if _normalize_option(option) != _normalize_option(
                     requested_option
                 ):
@@ -255,7 +262,8 @@ def parse_nav_csv(
                 if (
                     _normalize_scheme_name(scheme_name)
                     != _normalize_scheme_name(requested_base)
-                    or plan.casefold() != requested_plan.casefold()
+                    or _normalize_plan(plan)
+                    != _normalize_plan(requested_plan)
                     or _normalize_option(option)
                     != _normalize_option(requested_option)
                 ):
@@ -353,9 +361,7 @@ async def _fetch_nav_history_with_metadata(
     """
 
     if start_date > end_date:
-        raise ValueError(
-            "Start date cannot be later than end date."
-        )
+        raise ValueError("Start date cannot be later than end date.")
 
     days = (end_date - start_date).days + 1
 
@@ -388,7 +394,6 @@ async def _fetch_nav_history_with_metadata(
                 AMFI_NAV_URL,
                 params=params,
             )
-
             response.raise_for_status()
             retrieved_at = datetime.now(timezone.utc)
 
@@ -454,4 +459,3 @@ async def fetch_nav_history(
     )
 
     return result.text
-

@@ -59,10 +59,11 @@ def test_valid_portfolio_completes_full_workflow():
 
     # Audit trail must record the main workflow milestones.
     audit_events = [
-        event["event"] for event in result["audit_events"]
+        event["event_type"] for event in result["audit_events"]
     ]
-    assert "Portfolio input accepted for NAV retrieval" in audit_events
-    assert "NAV verification status: VERIFIED" in audit_events
-    assert "Portfolio valuation calculated" in audit_events
-    assert "Report generated" in audit_events
+
+    assert "portfolio_validation_passed" in audit_events
+    assert "portfolio_verification_completed" in audit_events
+    assert "portfolio_valuation_completed" in audit_events
+    assert "report_generated" in audit_events
 
