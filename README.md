@@ -1,254 +1,227 @@
-# FundVoiceAI
+# FundVoiceAI — Mutual Fund Portfolio Voice Reporter
 
-## Mutual Fund Portfolio Voice Reporter
+FundVoiceAI is a Python-based project designed to help investors understand their mutual fund portfolios through portfolio valuation, Net Asset Value (NAV) verification, scenario analysis, and AI-assisted voice reporting.
 
-FundVoiceAI is a project designed to help investors understand their mutual fund portfolios through portfolio valuation, Net Asset Value (NAV) retrieval and verification, and AI-powered voice reporting.
+The project combines portfolio calculations, NAV data retrieval, verification safeguards, and a Streamlit dashboard to make mutual fund portfolio information easier to understand.
 
-The project uses a workflow-based architecture to validate portfolio data, retrieve NAV information from the Association of Mutual Funds in India (AMFI), verify the data and supporting evidence, calculate portfolio valuation, and generate a report. When verification or processing fails, the workflow can route the result for human review rather than treating it as a confirmed report.
+> **Development status:** Active development. The automated test suite currently passes 94 tests. Full end-to-end validation with real portfolio data and voice playback.
 
-The voice interface, user interface, and persistent audit history are intended to build on this core workflow.
+## Key Features
 
-## Project Objectives
+- **Portfolio valuation:** Calculate portfolio value using mutual fund units and NAV data.
+- **NAV retrieval:** Retrieve and process NAV information, including CSV parsing.
+- **NAV verification:** Compare portfolio valuation inputs against available NAV data.
+- **Scenario handling:** Route supported user requests through scenario calculation and handling services.
+- **Safety checks:** Apply request-safety logic to supported portfolio-related workflows.
+- **Dashboard:** Provide a Streamlit interface for interacting with the portfolio reporter.
+- **Voice reporting:** Generate portfolio reports intended for voice-based delivery.
+- **Workflow orchestration:** Organize processing through agent and workflow components.
+- **Audit storage:** Provide a repository component for storing audit-related records.
+- **Automated tests:** Test core calculations, verification, routing, dashboard behavior, safety logic, workflows, and voice-report components.
 
-- Validate mutual fund portfolio data before processing.
-- Retrieve NAV records from AMFI's NAV history data.
-- Verify NAV values, dates, scheme matches, and supporting evidence.
-- Calculate individual holding values and total portfolio value.
-- Generate a portfolio report from verified valuation results.
-- Route invalid, incomplete, or unverified results for human review.
-- Provide a consistent workflow interface for application integration.
-- Support future voice reporting and run-history tracking.
-
-## Current Progress
-
-### 1. Portfolio Data Models
-
-Portfolio and NAV data models provide structured data for portfolio holdings and NAV records.
-
-Portfolio validation helps prevent invalid inputs from proceeding through the valuation workflow.
-
-### 2. NAV Retrieval
-
-The NAV retrieval service obtains historical NAV data from AMFI's NAV history endpoint.
-
-Current functionality includes:
-
-- Parsing the current AMFI-style eight-column NAV format.
-- Supporting the legacy six-column format.
-- Matching fund schemes and NAV dates.
-- Handling missing, duplicate, and invalid NAV records.
-- Retaining source information and evidence for verification.
-
-### 3. NAV Verification Engine
-
-The verification engine checks whether portfolio data and retrieved NAV records are suitable for valuation.
-
-Checks include:
-
-- Portfolio and holdings validity.
-- Non-negative and finite unit quantities.
-- NAV availability for the required scheme and date.
-- Duplicate NAV matches.
-- Positive and finite NAV values.
-- Supporting source URL and evidence text.
-
-Results that cannot be verified are not treated as successfully verified valuations.
-
-### 4. Portfolio Valuation
-
-The valuation service calculates individual holding values using the relevant verified NAV and unit quantity.
-
-**Holding value = Units held × NAV per unit**
-
-The service also calculates the total portfolio value from the individual holding values and checks that NAV records match the required scheme and valuation date.
-
-### 5. Agentic Workflow
-
-The project uses LangGraph to coordinate the main processing stages.
-
-The workflow follows this sequence:
-
-1. Validate the portfolio.
-2. Retrieve NAV data.
-3. Verify NAV data and evidence.
-4. Calculate portfolio valuation.
-5. Generate the portfolio report.
-6. Route cases requiring intervention to human review.
-
-The workflow's nodes and routing logic are implemented in `app/agents/`.
-
-### 6. Workflow Runner
-
-The public workflow entry point is implemented in:
-
-`app/services/workflow_runner.py`
-
-It exposes the function:
-
-```python
-from app.services.workflow_runner import run_portfolio_report
-
-result = run_portfolio_report(portfolio)
-```
-
-The function accepts a validated `PortfolioStatement` object and invokes the existing LangGraph workflow.
-
-The returned dictionary includes:
-
-- `portfolio_id`
-- `status`
-- `report`
-- `valuation`
-- `verification_status`
-- `human_review_required`
-- `errors`
-- `audit_events`
-
-The runner provides a consistent integration interface for the application UI. Its tests use a mocked workflow graph to verify the returned results and human-review handling.
-
-## Workflow Architecture
-
-```text
-Portfolio Input
-      |
-      v
-Validate Portfolio
-      |
-      v
-Retrieve NAV
-      |
-      v
-Verify NAV and Evidence
-      |
-      +---- Verification / processing issue
-      |                 |
-      |                 v
-      |            Human Review
-      |
-      v
-Calculate Valuation
-      |
-      v
-Generate Report
-      |
-      v
-Return Workflow Result
-```
-
-The diagram illustrates the intended processing flow. Actual routing depends on the workflow state and verification results.
-
-## Automated Testing
-
-The project includes automated tests for portfolio calculations, NAV retrieval and parsing, verification rules, valuation safeguards, and workflow behavior.
-
-Test coverage includes:
-
-- Portfolio valuation calculations.
-- Fractional units and rounding.
-- Invalid units and NAV values.
-- Current and legacy NAV CSV formats.
-- Missing and duplicate NAV records.
-- NAV date and scheme mismatches.
-- Missing verification evidence.
-- Human-review routing.
-- Workflow runner success and failure outcomes.
-
-### Current Test Status
-
-**Latest reported result: 52 automated tests passed.**
-
-```text
-52 passed
-```
-
-This result reflects the latest reported development-environment test run. The complete application still requires end-to-end testing after integration.
-
-### Run the Tests
-
-Activate your Python virtual environment, then run:
-
-```bash
-python -m pytest -v
-```
-
-To run the complete test suite with concise output:
-
-```bash
-python -m pytest -q
-```
-
-To run the workflow runner tests:
-
-```bash
-python -m pytest tests/test_workflow_runner.py -q
-```
+Feature availability and completeness may vary as development continues.
 
 ## Technology Stack
 
-The current implementation uses:
+- Python
+- Streamlit
+- pytest
+- Git and GitHub
 
-- **Python** — application logic and data processing.
-- **Pydantic** — structured data validation.
-- **LangGraph** — workflow orchestration.
-- **pytest** — automated testing.
-- **httpx** — HTTP requests for NAV retrieval.
-
-Streamlit, voice generation, and SQLite audit-history integration are planned or being developed as part of the broader application.
+Additional dependencies are defined by the project's dependency files, where available.
 
 ## Project Structure
 
-The following are the main relevant modules:
-
 ```text
-FundVoice-AI/
+FundVoiceAI/
 ├── app/
 │   ├── agents/
 │   │   ├── graph.py
 │   │   ├── nodes.py
-│   │   └── state.py
+│   │   ├── state.py
+│   │   ├── workflow.py
+│   │   └── test_workflow.py
 │   ├── models/
+│   │   └── portfolio.py
 │   ├── services/
 │   │   ├── nav_retriever.py
 │   │   ├── portfolio_valuation.py
-│   │   └── workflow_runner.py
-│   └── verification/
-│       └── engine.py
+│   │   ├── request_safety.py
+│   │   ├── scenario_calculations.py
+│   │   ├── scenario_router.py
+│   │   ├── unified_scenario_handler.py
+│   │   ├── valuation_display.py
+│   │   └── voice_report.py
+│   ├── storage/
+│   │   └── audit_repository.py
+│   ├── ui/
+│   │   └── dashboard.py
+│   ├── verification/
+│   │   └── engine.py
+│   └── main.py
 ├── tests/
-│   ├── test_agent_workflow.py
-│   ├── test_nav_retriever.py
-│   ├── test_portfolio_calculator.py
-│   ├── test_portfolio_valuation.py
-│   ├── test_verification.py
-│   ├── test_workflow_runner.py
-│   └── test_workflow_smoke.py
+├── evidence/
+├── .gitignore
 ├── README.md
-└── INTEGRATION_CONTRACT.md
+└── requirements.txt
 ```
 
-This is a summary of the principal files; additional modules and tests may exist in the repository.
+*This is a representative overview. The exact files and folders depend on the current checkout.*
 
-## Application Integration Status
+## Prerequisites
 
-The core workflow and supporting tests have been implemented. The workflow runner provides an entry point for the application interface.
+Before running FundVoiceAI, install:
 
-The following items remain subject to team integration and end-to-end verification:
+- Python compatible with the project's dependencies
+- Git
+- pip, Python's package installer
 
-- Streamlit portfolio input and report display.
-- Voice playback generated from the workflow's report.
-- SQLite persistence for run history and audit events.
-- Complete application testing with representative portfolio data.
-- Verification that unverified valuation figures are not presented as confirmed results.
+Use a virtual environment to isolate project dependencies.
 
-## Data Reliability and Safety
+## Installation
 
-FundVoiceAI is a portfolio reporting project, not a guarantee of investment performance or a recommendation to buy or sell mutual funds.
+### 1. Clone the repository
 
-NAV data and valuation results depend on the correctness, availability, and date of the underlying records. A successful automated test suite does not by itself establish the accuracy of every live data retrieval or integrated application run.
+```bash
+git clone <YOUR_GITHUB_REPOSITORY_URL>
+cd FundVoiceAI
+```
 
-The workflow is designed to flag verification and processing issues for human review instead of treating unsupported results as verified.
+Replace `<YOUR_GITHUB_REPOSITORY_URL>` with the HTTPS or SSH URL of your GitHub repository.
 
-## Development Status
+### 2. Create a virtual environment
 
-The core portfolio processing workflow, NAV retrieval, verification, valuation, report generation, workflow runner, and associated automated tests are implemented.
+**Windows PowerShell:**
 
-**Next milestone:** Integrate the core workflow with the user interface, voice reporting, and SQLite audit history, then validate the complete application end to end.
+```powershell
+python -m venv .venv
+```
+
+Activate it:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+If PowerShell blocks activation, use an approved environment-specific workaround or activate the environment through your IDE.
+
+### 3. Install dependencies
+
+If the repository contains `requirements.txt`, run:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+If the project uses another dependency manager, follow the corresponding project configuration instead.
+
+## Running the Application
+
+The Streamlit dashboard is located at `app/ui/dashboard.py`.
+
+With the virtual environment activated and dependencies installed, run:
+
+```powershell
+python -m streamlit run app/ui/dashboard.py
+```
+
+Streamlit normally prints a local URL in the terminal. Open that URL in your browser to access the dashboard.
+
+The exact interface and available functionality depend on the current implementation and configuration.
+
+## Running the Tests
+
+Run the complete test suite from the project root:
+
+```powershell
+python -m pytest -v
+```
+
+For a concise summary:
+
+```powershell
+python -m pytest -q
+```
+
+### Latest verified result
+
+```text
+94 passed in 1.46s
+```
+
+This result was observed in the current development environment. Test results can differ after dependency changes or when running in another environment.
+
+## How the Project Works
+
+At a high level, FundVoiceAI follows this processing flow:
+
+1. **Request input:** The user interacts with the application through its supported interface.
+2. **Request handling:** Application and workflow components process the request.
+3. **Portfolio modelling:** Portfolio data is represented using the project's data models.
+4. **NAV retrieval:** The relevant service retrieves or parses available NAV information.
+5. **Valuation:** The valuation service calculates portfolio values using supported inputs.
+6. **Verification:** Verification components check the relevant portfolio and NAV information.
+7. **Scenario handling:** Supported scenarios are routed to their corresponding processing components.
+8. **Report generation:** The application prepares a portfolio report.
+9. **Voice delivery:** The voice-report component supports the intended voice-reporting functionality.
+
+The precise execution path depends on the request type and the current implementation. This overview describes the intended architecture rather than guaranteeing that every step has been validated end to end.
+
+## Data and Financial Accuracy
+
+FundVoiceAI is a development project, not a substitute for official mutual fund statements or professional financial advice.
+
+- NAV availability and dates can affect valuation results.
+- Portfolio calculations depend on the correctness of the supplied units, NAV values, and other inputs.
+- Historical data and corporate actions may require additional validation.
+- Missing, stale, or inconsistent data should not be treated as verified information.
+- Users should independently confirm important values against official fund-house or other authoritative records.
+
+The application should not be assumed to provide investment recommendations or guaranteed returns.
+
+## Security and Privacy
+
+Before uploading the repository to GitHub:
+
+- Never commit API keys, access tokens, passwords, or credentials.
+- Keep `.env` files and Streamlit secrets out of version control.
+- Do not commit real investor statements, account numbers, or personally identifiable financial information.
+- Use synthetic or anonymized portfolio data in examples and tests.
+- Review the contents of the `evidence/` directory before publishing.
+- Exclude temporary backup files and local environment directories.
+
+A private repository is recommended during active development, but private visibility does not replace proper secret and data handling.
+
+## Current Limitations and Future Work
+
+Planned or pending validation areas include:
+
+- End-to-end testing with representative portfolio data
+- Verification of NAV retrieval across different dates and data sources
+- Additional handling for historical corporate actions, such as unit splits, where supported data is available
+- Full validation of voice playback from generated reports
+- Broader error handling and data-quality checks
+- Integration testing of the dashboard, workflow, valuation, and verification components
+- Documentation of configuration, supported inputs, and known limitations
+
+These items should be marked complete only after their corresponding implementation and tests have been verified.
+
+## Development Workflow
+
+To contribute or continue development:
+
+1. Create a feature branch for substantial changes.
+2. Make the required code changes.
+3. Add or update automated tests.
+4. Run `python -m pytest -q`.
+5. Review the changes with `git diff`.
+6. Commit the changes with a descriptive message.
+7. Push the branch to GitHub and review the changes before merging.
+
+## License
+
+No license has been specified yet. Add a `LICENSE` file before distributing the project under an open-source license.
+
+## Project Goal
+
+The long-term goal of FundVoiceAI is to make mutual fund portfolio information more accessible by combining reliable portfolio calculations, NAV verification, clear reporting, and voice-based interaction.

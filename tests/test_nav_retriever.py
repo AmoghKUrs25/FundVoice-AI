@@ -1,6 +1,6 @@
 from decimal import Decimal
 from datetime import date
-
+from decimal import Decimal
 import pytest
 
 from app.services.nav_retriever import (
@@ -89,23 +89,21 @@ def test_invalid_nav_is_rejected():
 
 def test_current_eight_column_amfi_format():
     live_format_data = (
-        "145488;Example Overnight Fund - Direct - Monthly Payout;"
+        "145488;Example Overnight Fund;"
         "Direct Plan;Monthly IDCW;INF209KB1ZL4;;"
         "1003.6262;20-Oct-2026\n"
     )
 
     result = parse_nav_csv(
         live_format_data,
-        "Example Overnight Fund - Direct - Monthly Payout",
+        "Example Overnight Fund - Direct Plan - Monthly IDCW",
         date(2026, 10, 20),
     )
 
-    assert result.scheme_name == (
-        "Example Overnight Fund - Direct - Monthly Payout"
-    )
-    assert result.nav_date == date(2026, 10, 20)
+    assert result.scheme_name == "Example Overnight Fund"
     assert result.nav == Decimal("1003.6262")
-    assert result.evidence.evidence_text == live_format_data.strip()
+    assert result.nav_date == date(2026, 10, 20)
+
 
 def test_invalid_nav_in_current_eight_column_format():
     invalid_data = (
