@@ -1,301 +1,515 @@
 
+"""LangGraph nodes for the FundVoiceAI portfolio workflow."""
+
+import asyncio
 from datetime import datetime, timezone
-from decimal import Decimal
 from typing import Any
 
 from app.agents.state import FundVoiceState
+from app.models.verification import VerificationStatus
+from app.services.nav_retriever import (
+    AMFI_NAV_URL,
+    NAVRetrievalError,
+    fetch_nav_history,
+    get_fund_house_id,
+    parse_nav_csv,
+)
+from app.services.portfolio_valuation import value_portfolio
+from app.storage.audit_repository import AuditRepository
+from app.verification.engine import verify_portfolio
 
 
-def add_audit_event(state: FundVoiceState, message: str) -> list[dict[str, Any]]:
-    """Return a new audit trail containing this workflow event."""
+def add_audit_event(
+    state: FundVoiceState,
+    event_type: str,
+    details: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Append a timestamped event to the workflow's audit history."""
+
     events = list(state.get("audit_events", []))
     events.append(
         {
-            "event": message,
+            "event_type": event_type,
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "details": details,
         }
     )
     return events
 
 
-def validate_portfolio_node(state: FundVoiceState) -> dict:
-    """Check that a portfolio was provided before proceeding."""
+def build_nav_evidence_audit(
+    nav_records: list[Any],
+) -> list[dict[str, Any]]:
+    """Prepare NAV evidence metadata for persistent audit storage."""
+
+    evidence_items = []
+
+    for record in nav_records:
+        evidence = record.evidence
+        retrieved_at = getattr(evidence, "retrieved_at", None)
+
+        evidence_items.append(
+            {
+                "scheme_name": record.scheme_name,
+                "nav_date": record.nav_date.isoformat(),
+                "nav": str(record.nav),
+                "evidence_id": evidence.evidence_id,
+                "source_url": evidence.source_url,
+                "retrieved_at": (
+                    retrieved_at.isoformat()
+                    if isinstance(retrieved_at, datetime)
+                    else None
+                ),
+            }
+        )
+
+    return evidence_items
+
+
+def validate_portfolio_node(
+    state: FundVoiceState,
+) -> dict[str, Any]:
+    """Check whether a portfolio is available for processing."""
+
     portfolio = state.get("portfolio")
-    errors = list(state.get("errors", []))
 
     if portfolio is None:
-        errors.append("Portfolio input is missing.")
+        errors = list(state.get("errors", []))
+        errors.append("Portfolio data is missing.")
+
         return {
             "errors": errors,
             "human_review_required": True,
             "next_action": "human_review",
             "audit_events": add_audit_event(
-                state, "Portfolio validation failed: missing input"
-            ),
-        }
-
-    holdings = getattr(portfolio, "holdings", None)
-    if holdings is None and isinstance(portfolio, dict):
-        holdings = portfolio.get("holdings")
-
-    if not holdings:
-        errors.append("Portfolio has no holdings.")
-        return {
-            "errors": errors,
-            "human_review_required": True,
-            "next_action": "human_review",
-            "audit_events": add_audit_event(
-                state, "Portfolio validation failed: no holdings"
+                state,
+                "portfolio_validation_failed",
+                {"reason": "Portfolio data is missing."},
             ),
         }
 
     return {
-        "errors": errors,
+        "errors": [],
         "human_review_required": False,
         "next_action": "retrieve_nav",
         "audit_events": add_audit_event(
-            state, "Portfolio input accepted for NAV retrieval"
+            state,
+            "portfolio_validation_passed",
+            {"portfolio_id": portfolio.portfolio_id},
         ),
     }
 
 
-def retrieve_nav_node(state: FundVoiceState) -> dict:
-    """Use supplied NAV records or retrieve them from AMFI."""
-
-    from app.services.nav_retriever import (
-        NAVRetrievalError,
-        fetch_nav_history_sync,
-        parse_nav_csv,
-    )
+def retrieve_nav_node(
+    state: FundVoiceState,
+) -> dict[str, Any]:
+    """Retrieve exact-date NAV records for all portfolio holdings."""
 
     portfolio = state.get("portfolio")
-    nav_records = state.get("nav_records", [])
 
-    # Preserve preloaded records used by tests or other integrations.
-    if nav_records:
+    if portfolio is None:
+        errors = list(state.get("errors", []))
+        errors.append("Portfolio is missing.")
+
         return {
-            "human_review_required": False,
-            "next_action": "verify_nav",
+            "errors": errors,
+            "valuation": None,
+            "human_review_required": True,
+            "next_action": "human_review",
             "audit_events": add_audit_event(
-                state, "NAV records supplied for verification"
+                state,
+                "nav_retrieval_failed",
+                {"reason": "Cannot retrieve NAV without a portfolio."},
             ),
         }
 
-    if portfolio is None:
+    supplied_records = state.get("nav_records", [])
+
+    if supplied_records:
         return {
-            "human_review_required": True,
-            "next_action": "human_review",
-            "errors": list(state.get("errors", []))
-            + ["Cannot retrieve NAV without a portfolio."],
+            "nav_records": supplied_records,
+            "errors": [],
+            "retry_count": state.get("retry_count", 0),
+            "human_review_required": False,
+            "next_action": "verify_nav",
             "audit_events": add_audit_event(
-                state, "NAV retrieval stopped: portfolio missing"
+                state,
+                "nav_records_reused",
+                {
+                    "record_count": len(supplied_records),
+                    "source": "existing_workflow_state",
+                },
             ),
         }
 
     valuation_date = portfolio.valuation_date
+    previous_retry_count = state.get("retry_count", 0)
+
     retrieved_records = []
+    retrieval_errors = []
 
-    try:
-        csv_text = fetch_nav_history_sync(
-            valuation_date,
-            valuation_date,
-        )
+    # Cache fetched data and metadata once per fund house.
+    csv_by_fund_house = {}
 
-        for holding in portfolio.holdings:
+    for holding in portfolio.holdings:
+        try:
+            fund_house_id = get_fund_house_id(holding.scheme_name)
+
+            if fund_house_id not in csv_by_fund_house:
+                csv_text = asyncio.run(
+                    fetch_nav_history(
+                        start_date=valuation_date,
+                        end_date=valuation_date,
+                        fund_house_id=fund_house_id,
+                    )
+                )
+
+                # This is the configured URL, not necessarily a redirected URL.
+                csv_by_fund_house[fund_house_id] = {
+                    "text": csv_text,
+                    "source_url": AMFI_NAV_URL,
+                    "retrieved_at": datetime.now(timezone.utc),
+                }
+
+            fetch_result = csv_by_fund_house[fund_house_id]
+
+            requested_nav_name = holding.scheme_name
+            if holding.plan and holding.option:
+                requested_nav_name = (
+                    f"{holding.scheme_name} - "
+                    f"{holding.plan} - {holding.option}"
+                )
+
             record = parse_nav_csv(
-                csv_text,
-                holding.scheme_name,
-                valuation_date,
+                csv_text=fetch_result["text"],
+                requested_scheme_name=requested_nav_name,
+                requested_date=valuation_date,
+                source_url=fetch_result["source_url"],
+                retrieved_at=fetch_result["retrieved_at"],
             )
+
             retrieved_records.append(record)
 
-    except (NAVRetrievalError, ValueError) as exc:
+        except (NAVRetrievalError, ValueError) as exc:
+            retrieval_errors.append(
+                f"{holding.scheme_name}: {exc}"
+            )
+
+        except Exception as exc:
+            retrieval_errors.append(
+                f"{holding.scheme_name}: "
+                f"Unexpected retrieval error: {exc}"
+            )
+
+    if retrieval_errors:
+        next_retry_count = previous_retry_count + 1
+
+        if next_retry_count < 2:
+            return {
+                "nav_records": retrieved_records,
+                "errors": retrieval_errors,
+                "retry_count": next_retry_count,
+                "valuation": None,
+                "human_review_required": False,
+                "next_action": "retry_nav",
+                "audit_events": add_audit_event(
+                    state,
+                    "nav_retrieval_retry",
+                    {
+                        "attempt": next_retry_count,
+                        "errors": retrieval_errors,
+                    },
+                ),
+            }
+
         return {
+            "nav_records": retrieved_records,
+            "errors": retrieval_errors,
+            "retry_count": next_retry_count,
+            "valuation": None,
             "human_review_required": True,
             "next_action": "human_review",
-            "errors": list(state.get("errors", []))
-            + [f"NAV retrieval failed: {exc}"],
             "audit_events": add_audit_event(
-                state, "NAV retrieval failed; human review required"
+                state,
+                "nav_retrieval_failed",
+                {
+                    "reason": (
+                        "NAV retrieval failed after the "
+                        "permitted attempts."
+                    ),
+                    "errors": retrieval_errors,
+                },
             ),
         }
 
     return {
         "nav_records": retrieved_records,
+        "errors": [],
+        "retry_count": previous_retry_count,
         "human_review_required": False,
         "next_action": "verify_nav",
         "audit_events": add_audit_event(
-            state, "NAV records retrieved from AMFI"
+            state,
+            "nav_retrieval_succeeded",
+            {
+                "record_count": len(retrieved_records),
+                "valuation_date": str(valuation_date),
+            },
         ),
     }
 
 
-def verify_nav_node(state: FundVoiceState) -> dict:
-    """Run the project's existing verification engine."""
-    from app.verification.engine import verify_portfolio
+def verify_nav_node(
+    state: FundVoiceState,
+) -> dict[str, Any]:
+    """Verify NAV records and persist the verification audit."""
 
     portfolio = state.get("portfolio")
     nav_records = state.get("nav_records", [])
 
-    if portfolio is None or not nav_records:
+    if portfolio is None:
+        errors = list(state.get("errors", []))
+        errors.append("Portfolio is missing.")
+
         return {
+            "verification": None,
+            "valuation": None,
+            "errors": errors,
             "human_review_required": True,
             "next_action": "human_review",
-            "errors": list(state.get("errors", []))
-            + ["Portfolio or NAV data is missing for verification."],
             "audit_events": add_audit_event(
-                state, "Verification stopped because required data is missing"
+                state,
+                "verification_failed",
+                {
+                    "status": "FAILED",
+                    "reason": "Portfolio is missing.",
+                    "checks_passed": [],
+                    "checks_failed": [
+                        {
+                            "code": "PORTFOLIO_NOT_FOUND",
+                            "message": (
+                                "No portfolio was supplied "
+                                "for verification."
+                            ),
+                        }
+                    ],
+                    "human_review_required": True,
+                },
             ),
         }
 
+    # First, run the actual verification.
+    verification = verify_portfolio(portfolio, nav_records)
+
+    checks_passed = list(verification.checks_passed)
+
+    checks_failed = [
+        {
+            "code": issue.code,
+            "message": issue.message,
+            "holding_id": issue.holding_id,
+        }
+        for issue in verification.issues
+    ]
+
+    human_review_required = (
+        verification.status != VerificationStatus.VERIFIED
+    )
+
+    event_type = (
+        "portfolio_verification_completed"
+        if not human_review_required
+        else "verification_requires_review"
+    )
+
+    # Preserve the verification event in workflow state.
+    audit_events = add_audit_event(
+        state,
+        event_type,
+        {
+            "portfolio_id": portfolio.portfolio_id,
+            "status": verification.status.value,
+            "checks_passed": checks_passed,
+            "checks_failed": checks_failed,
+            "human_review_required": human_review_required,
+        },
+    )
+
+    # Persist the verification result and NAV evidence in SQLite.
     try:
-        result = verify_portfolio(portfolio, nav_records)
-    except Exception as exc:
-        return {
-            "human_review_required": True,
-            "next_action": "human_review",
-            "errors": list(state.get("errors", []))
-            + [f"Verification could not complete: {exc}"],
-            "audit_events": add_audit_event(
-                state, "Verification raised an exception"
-            ),
-        }
+        repository = AuditRepository()
 
-    status = getattr(result, "status", None)
-    status_value = getattr(status, "value", status)
-    verified = str(status_value).upper() == "VERIFIED"
+        repository.record_verification(
+            run_id=str(
+                state.get("run_id")
+                or portfolio.portfolio_id
+            ),
+            portfolio_id=portfolio.portfolio_id,
+            verification_status=verification.status.value,
+            checks_passed=checks_passed,
+            issues=checks_failed,
+            nav_evidence=build_nav_evidence_audit(nav_records),
+        )
+
+    except Exception as exc:
+        # Make persistence failure visible; do not pretend that
+        # the database write succeeded.
+        audit_events = add_audit_event(
+            {
+                **state,
+                "audit_events": audit_events,
+            },
+            "audit_persistence_failed",
+            {
+                "portfolio_id": portfolio.portfolio_id,
+                "operation": "record_verification",
+                "error": str(exc),
+            },
+        )
+
+    errors = list(state.get("errors", []))
+
+    if human_review_required:
+        for issue in verification.issues:
+            if issue.message not in errors:
+                errors.append(issue.message)
 
     return {
-        "verification": result,
-        "human_review_required": not verified,
-        "next_action": "calculate_valuation" if verified else "human_review",
-        "audit_events": add_audit_event(
-            state, f"NAV verification status: {status_value}"
+        "verification": verification,
+        "valuation": None,
+        "errors": errors,
+        "human_review_required": human_review_required,
+        "next_action": (
+            "continue"
+            if not human_review_required
+            else "human_review"
         ),
+        "audit_events": audit_events,
     }
 
 
-def calculate_valuation_node(state: FundVoiceState) -> dict:
-    """Calculate portfolio valuation only after successful verification."""
+def calculate_valuation_node(
+    state: FundVoiceState,
+) -> dict[str, Any]:
+    """Calculate portfolio value only after successful verification."""
+
+    portfolio = state.get("portfolio")
+    nav_records = state.get("nav_records", [])
     verification = state.get("verification")
-    status = getattr(verification, "status", None)
-    status_value = getattr(status, "value", status)
 
-    if str(status_value).upper() != "VERIFIED":
+    if (
+        portfolio is None
+        or not nav_records
+        or verification is None
+        or verification.status != VerificationStatus.VERIFIED
+    ):
         return {
+            "valuation": None,
             "human_review_required": True,
             "next_action": "human_review",
-            "errors": list(state.get("errors", []))
-            + ["Valuation blocked because verification did not pass."],
             "audit_events": add_audit_event(
-                state, "Valuation blocked by verification gate"
+                state,
+                "valuation_blocked",
+                {"reason": "Verification has not passed."},
             ),
         }
 
-    from app.services.portfolio_valuation import value_portfolio
-
-    try:
-        valuation = value_portfolio(
-            state["portfolio"],
-            state.get("nav_records", []),
-        )
-    except Exception as exc:
-        return {
-            "human_review_required": True,
-            "next_action": "human_review",
-            "errors": list(state.get("errors", []))
-            + [f"Valuation failed: {exc}"],
-            "audit_events": add_audit_event(
-                state, "Valuation calculation failed"
-            ),
-        }
+    valuation = value_portfolio(portfolio, nav_records)
 
     return {
         "valuation": valuation,
         "human_review_required": False,
         "next_action": "generate_report",
         "audit_events": add_audit_event(
-            state, "Portfolio valuation calculated"
+            state,
+            "portfolio_valuation_completed",
+            {
+                "valuation_date": str(
+                    valuation["valuation_date"]
+                ),
+                "total_value": str(valuation["total_value"]),
+            },
         ),
     }
 
 
-def generate_report_node(state: FundVoiceState) -> dict:
-    """Generate a portfolio report from verified valuation results."""
-
-    verification = state.get("verification")
-    status = getattr(verification, "status", None)
-    status_value = getattr(status, "value", status)
-
-    if str(status_value).upper() != "VERIFIED":
-        errors = list(state.get("errors", []))
-        errors.append(
-            "Report generation blocked because NAV verification did not pass."
-        )
-        return human_review_node({**state, "errors": errors})
+def generate_report_node(
+    state: FundVoiceState,
+) -> dict[str, Any]:
+    """Generate a factual report from the verified valuation."""
 
     valuation = state.get("valuation")
-    if not valuation:
-        errors = list(state.get("errors", []))
-        errors.append(
-            "Valuation is missing; report generation was blocked."
-        )
-        return human_review_node({**state, "errors": errors})
 
-    holdings = valuation.get("holdings", [])
+    if valuation is None:
+        return human_review_node(state)
 
-    report_lines = [
-        "FundVoice AI — Mutual Fund Portfolio Report",
-        f"Portfolio ID: {valuation['portfolio_id']}",
-        f"Valuation date: {valuation['valuation_date']}",
-        "",
-        "Holdings:",
-    ]
+    verification = state.get("verification")
 
-    for holding in holdings:
-        report_lines.extend(
-            [
-                f"Fund: {holding['scheme_name']}",
-                f"Units: {holding['units']}",
-                f"NAV: ₹{holding['nav']}",
-                f"Holding value: ₹{holding['value']}",
-                f"NAV date: {holding['nav_date']}",
-                f"Evidence ID: {holding['evidence_id']}",
-                f"Source: {holding['source_url']}",
-                "",
-            ]
-        )
+    if (
+        verification is None
+        or verification.status != VerificationStatus.VERIFIED
+    ):
+        return human_review_node(state)
 
-    report_lines.extend(
-        [
-            f"Total portfolio value: ₹{valuation['total_value']}",
-            "",
-            "Verification: Passed by the configured verification checks.",
-            (
-                "Note: NAV evidence presence was checked; "
-                "independent source authentication is not implied."
-            ),
-        ]
+    total_value = valuation["total_value"]
+    valuation_date = valuation["valuation_date"]
+
+    report = (
+        f"Portfolio valuation for {valuation_date}. "
+        f"The calculated portfolio value is ₹{total_value:,.2f}. "
+        "This report presents a valuation, not investment advice."
     )
 
-    audit_events = add_audit_event(state, "Report generated")
-
     return {
-        "report": "\n".join(report_lines),
+        "report": report,
+        "next_action": "completed",
         "human_review_required": False,
-        "next_action": "complete",
-        "errors": state.get("errors", []),
-        "audit_events": audit_events,
+        "audit_events": add_audit_event(
+            state,
+            "report_generated",
+            {
+                "valuation_date": str(valuation_date),
+                "total_value": str(total_value),
+            },
+        ),
     }
 
 
-def human_review_node(state: FundVoiceState) -> dict:
-    """Pause the workflow and flag it for human review."""
+def human_review_node(
+    state: FundVoiceState,
+) -> dict[str, Any]:
+    """Require human review and prevent an unverified valuation."""
+
+    errors = list(state.get("errors", []))
+    verification = state.get("verification")
+
+    if verification is not None:
+        for issue in verification.issues:
+            if issue.message not in errors:
+                errors.append(issue.message)
+
+    if not errors:
+        errors.append(
+            "The portfolio could not be verified automatically."
+        )
+
+    report = (
+        "Human review required. "
+        + " ".join(errors)
+        + " No verified valuation is being presented."
+    )
+
+    audit_events = add_audit_event(
+        state,
+        "human_review_required",
+        {"reasons": errors},
+    )
+
     return {
+        "valuation": None,
+        "report": report,
+        "errors": errors,
         "human_review_required": True,
         "next_action": "human_review",
-        "errors": list(state.get("errors", [])),
-        "audit_events": add_audit_event(
-            state, "Workflow paused for human review"
-        ),
+        "audit_events": audit_events,
     }

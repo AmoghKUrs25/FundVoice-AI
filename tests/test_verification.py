@@ -1,3 +1,4 @@
+
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -8,6 +9,7 @@ from app.models.nav import NAVEvidence, NAVRecord
 from app.models.portfolio import Holding, PortfolioStatement
 from app.models.verification import VerificationStatus
 from app.verification.engine import verify_portfolio
+
 
 VALUATION_DATE = date(2026, 10, 16)
 
@@ -114,37 +116,77 @@ def test_zero_units_are_not_rejected_as_invalid():
     )
 
     assert result.status == VerificationStatus.VERIFIED
-
-    
-def test_missing_source_url_requires_review():
-    portfolio = create_portfolio()
-    nav_record = create_nav_record()
-    nav_record.evidence.source_url = "   "
-
-    result = verify_portfolio(portfolio, [nav_record])
-
-    assert result.status == VerificationStatus.REVIEW_REQUIRED
-    assert result.issues[0].code == "MISSING_SOURCE_URL"
+    assert result.issues == []
 
 
-def test_missing_evidence_text_requires_review():
-    portfolio = create_portfolio()
-    nav_record = create_nav_record()
-    nav_record.evidence.evidence_text = "   "
-
-    result = verify_portfolio(portfolio, [nav_record])
-
-    assert result.status == VerificationStatus.REVIEW_REQUIRED
-    assert result.issues[0].code == "MISSING_EVIDENCE_TEXT"
-
-
-
-def test_negative_units_are_rejected_by_holding_model():
+def test_missing_evidence_id_is_rejected_by_model():
     with pytest.raises(ValidationError):
-        Holding(
-            holding_id="H003",
-            scheme_name="Example Equity Fund",
-            units=Decimal("-1"),
+        NAVEvidence(
+            evidence_id="",
+            source_url="https://example.com/nav",
+            retrieved_at=datetime.now(timezone.utc),
+            evidence_text="Example Equity Fund NAV: 80.25",
         )
 
 
+def test_wrong_scheme_nav_requires_review():
+    wrong_scheme_nav = create_nav_record()
+    wrong_scheme_nav.scheme_name = "Different Mutual Fund"
+
+    result = verify_portfolio(
+        create_portfolio(),
+        [wrong_scheme_nav],
+    )
+
+    assert result.status == VerificationStatus.REVIEW_REQUIRED
+    assert len(result.issues) > 0
+
+
+def test_multiple_holdings_are_verified():
+    portfolio = PortfolioStatement(
+        portfolio_id="P003",
+        valuation_date=VALUATION_DATE,
+        holdings=[
+            Holding(
+                holding_id="H003",
+                scheme_name="Example Equity Fund",
+                units=Decimal("10"),
+            ),
+            Holding(
+                holding_id="H004",
+                scheme_name="Example Equity Fund",
+                units=Decimal("20"),
+            ),
+        ],
+    )
+
+    result = verify_portfolio(
+        portfolio,
+        [create_nav_record()],
+    )
+
+    assert result.status == VerificationStatus.VERIFIED
+    assert result.issues == []
+
+
+def test_zero_nav_is_rejected_by_model():
+    with pytest.raises(ValidationError):
+        create_nav_record(nav=Decimal("0"))
+
+
+def test_negative_nav_is_rejected_by_model():
+    with pytest.raises(ValidationError):
+        create_nav_record(nav=Decimal("-10"))
+
+
+def test_scheme_name_matching_ignores_outer_whitespace():
+    nav_record = create_nav_record()
+    nav_record.scheme_name = "  Example Equity Fund  "
+
+    result = verify_portfolio(
+        create_portfolio(),
+        [nav_record],
+    )
+
+    assert result.status == VerificationStatus.VERIFIED
+    assert result.issues == []

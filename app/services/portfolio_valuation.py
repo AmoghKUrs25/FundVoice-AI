@@ -140,3 +140,18 @@ def verified_portfolio_valuation(
         "issues": [],
         "valuation": valuation,
     }
+
+def calculate_portfolio_valuation(
+    portfolio: PortfolioStatement,
+    nav_records: list[NAVRecord],
+) -> dict:
+    """
+    Compatibility wrapper for the agent workflow.
+
+    Delegates valuation to the existing value_portfolio()
+    function, preserving the current valuation logic.
+    """
+    return value_portfolio(portfolio, nav_records)
+
+
+

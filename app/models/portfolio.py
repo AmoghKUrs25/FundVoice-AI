@@ -13,6 +13,8 @@ class Holding(BaseModel):
     holding_id: str = Field(min_length=1)
     scheme_name: str = Field(min_length=1)
     units: Decimal = Field(ge=Decimal("0"))
+    plan: str | None = None
+    option: str | None = None
 
     @field_validator("units")
     @classmethod
